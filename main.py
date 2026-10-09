@@ -1,5 +1,6 @@
 import hashlib #to create hashes for the blocks
 import json #to encode and decode blocks when storing and loading
+import requests #to make HTTP requests to other nodes in the network
 from time import time #to record the time of the block creation
 
 class Blockchain():
@@ -41,15 +42,18 @@ class Blockchain():
             return self.chain[-1] #return the last block in the chain
 
 
-        def proof_of_work(self, last_proof):
+        def proof_of_work(self, last_block):
+            last_proof = last_block['proof'] #get the proof of the last block
+            last_hash = self.hash(last_block) #get the hash of the last block
+
             proof = 0
-            while self.valid_proof(last_proof, proof) is False:
+            while self.valid_proof(last_proof, proof, last_hash) is False:
                 proof += 1
             return proof
 
         @staticmethod
-        def valid_proof(self, last_proof, proof):
-            guess = f'{last_proof}{proof}'.encode() #encode combination of last proof and current proof to bytes
+        def valid_proof(self, last_proof, proof, last_hash):
+            guess = f'{last_proof}{proof}{last_hash}'.encode() #encode combination of last proof and current proof to bytes
             guess_hash = hashlib.sha256(guess).hexdigest() #hash the guess
             return guess_hash[:4] == "0000" #return result of the check
 
@@ -73,3 +77,28 @@ class Blockchain():
 
         def resolve_conflicts(self):
             #Resolves conflicts by replacing our chain with the longest one in the network (consensus algorithm)
+            neighbors = self.nodes
+            new_chain = None
+
+            #We're only looking for chains longer than ours
+            max_length = len(self.chain)
+
+            for node in neighbors:
+                response = requests.get(f'http://{node}/chain')
+
+                if response.status_code == 200:
+                    length = response.json()['length']
+                    chain = response.json()['chain']
+
+                    if length > max_length and self.valid_chain(chain):
+                        max_length = length
+                        new_chain = chain
+
+            #Replace our chain if another node has a valid chain longer than ours
+            if new_chain:
+                self.chain = new_chain
+                return True
+
+            return False
+
+        
