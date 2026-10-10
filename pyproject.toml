@@ -14,4 +14,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["app", "block", "blockchain", "main", "network"]
+py-modules = ["app", "block", "blockchain", "main"]

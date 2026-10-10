@@ -9,9 +9,13 @@ def create_app(blockchain_instance=None):
 
     @app.route("/transaction", methods=["POST"])
     def create_transaction():
+
+        #get_json returns None if the request does not contain valid JSON data, so we use 
+        #silent=True to avoid raising an error and provide a default empty dictionary if no data is provided.
         values = request.get_json(silent=True) or {}
         required = ["sender", "receiver", "amount"]
 
+        #Data validation: Check if all required fields are present in the request payload
         if not all(key in values for key in required):
             return jsonify({"message": "Missing values"}), 400
 
@@ -22,6 +26,7 @@ def create_app(blockchain_instance=None):
             "amount": values["amount"],
         }
 
+        #broadcasts the transaction across all the network nodes
         for peer in list(blockchain.nodes):
             try:
                 import requests
@@ -36,6 +41,7 @@ def create_app(blockchain_instance=None):
         values = request.get_json(silent=True) or {}
         required = ["sender", "receiver", "amount"]
 
+        #Data validation
         if not all(key in values for key in required):
             return jsonify({"message": "Missing values"}), 400
 

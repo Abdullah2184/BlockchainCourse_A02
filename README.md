@@ -20,8 +20,6 @@ The main pieces are:
   registered peers.
 - [`app.py`](./app.py) exposes the Flask HTTP API and broadcasts transactions
   and newly mined blocks to registered peers.
-- [`network.py`](./network.py) re-exports the app and its default blockchain
-  instance for compatibility.
 - [`main.py`](./main.py) starts one node. Each process gets a distinct node
   identifier and its own in-memory state.
 

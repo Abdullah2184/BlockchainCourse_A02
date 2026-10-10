@@ -35,7 +35,6 @@ The implementation is divided into these modules:
 - `blockchain.py`: chain state, transactions, mining, validation, peer
   registration, and chain resolution.
 - `app.py`: Flask application factory and HTTP endpoints.
-- `network.py`: compatibility exports for the application and default chain.
 - `main.py`: command-line entry point; accepts an optional listening port
   (default `5000`).
 

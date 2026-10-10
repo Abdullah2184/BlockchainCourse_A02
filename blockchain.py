@@ -9,11 +9,11 @@ from block import hash_block
 
 class Blockchain:
     def __init__(self):
-        self.chain = []
-        self.current_transactions = []
-        self.nodes = set()
-        self.node_id = str(uuid4()).replace("-", "")
-        self.new_block(proof=100, previous_hash="0" * 64, is_genesis=True)
+        self.chain = [] # Store the list of blocks in the blockchain
+        self.current_transactions = [] # Store the current list of transactions
+        self.nodes = set() # Store the addresses of other nodes in the network
+        self.node_id = str(uuid4()).replace("-", "") # Generate a unique identifier for the node
+        self.new_block(proof=100, previous_hash="0" * 64, is_genesis=True) #Creating the genesis block
 
     def new_block(self, proof, previous_hash=None, is_genesis=False):
         block = {
