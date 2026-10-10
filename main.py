@@ -4,8 +4,8 @@ import threading
 from pathlib import Path
 
 from app import create_app
-from blockchain import Blockchain
-
+from ledger.blockchain import Blockchain
+ 
 
 def _synchronize_periodically(blockchain, stop_event):
     while not stop_event.is_set():

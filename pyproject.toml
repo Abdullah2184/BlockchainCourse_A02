@@ -14,4 +14,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["app", "block", "blockchain", "main"]
+py-modules = ["app", "block", "main"]
+packages = ["api", "ledger"]

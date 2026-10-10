@@ -2,250 +2,251 @@
 
 ## 1. Introduction
 
-This project is a learning-oriented implementation of a small peer-to-peer
-blockchain network in Python. It demonstrates a SHA-256-linked ledger,
-transactions, a proof-of-work search, HTTP communication between nodes, and
-basic longest-chain synchronization. Each node runs as an independent Flask
-process and maintains its own in-memory state.
+This project is a Python educational prototype of a peer-to-peer blockchain
+network. Each node exposes an HTTP API, maintains a local copy of the chain,
+stores UUID-identified accounts and integer balances, validates and mines
+blocks, broadcasts updates, and periodically synchronizes from peers.
 
-The implementation is intentionally minimal. It illustrates core blockchain
-concepts, but its validation, consensus, and security properties are not
-sufficient for production use.
+The implementation demonstrates ledger and networking concepts; it is not a
+production cryptocurrency, a secure payment system, or a Byzantine-fault
+tolerant consensus protocol.
 
 ## 2. Blockchain Architecture
 
-The application uses a set of nodes that each maintain a local chain. A node
-can register peer addresses, accept transactions, mine blocks, broadcast new
-transactions and blocks, and request peer chains. The network transport is
-HTTP using Flask routes on the receiving side and the `requests` library on
-the sending side.
+Each node maintains a deterministic genesis block, ordered blocks linked by
+SHA-256 hashes, pending transactions, a user registry, peer addresses, and
+balances derived from the chain. A transaction has a UUID transaction
+identifier, type, sender ID, recipient ID, and positive integer amount.
+Transfers require a registered sender and recipient and sufficient available
+balance. New accounts have zero balance.
 
-The ledger is a sequence of dictionaries. Each block stores an index,
-timestamp, transaction list, proof value, previous block hash, and its own
-hash. The hash is SHA-256 over JSON-serialized block fields (sorted by key)
-other than the stored hash. This makes changes to hashed block fields
-detectable when the hash is recalculated, and each subsequent block refers to
-the preceding block's hash.
+Mining adds pending transactions and exactly one fixed reward of one unit to
+the block's miner account. The node validates the candidate chain and
+recomputes balances before committing its new local state. It then broadcasts
+the block to peers.
 
 ## 3. System Architecture
 
-The implementation is divided into these modules:
+Implementation responsibilities are separated into modules:
 
-- `block.py`: canonical JSON serialization and block hashing.
-- `blockchain.py`: chain state, transactions, mining, validation, peer
-  registration, and chain resolution.
-- `app.py`: Flask application factory and HTTP endpoints.
-- `main.py`: command-line entry point; accepts an optional listening port
-  (default `5000`).
+- `block.py`: stable JSON representation and SHA-256 block hashing.
+- `ledger/constants.py`: fixed proof-of-work difficulty, system account,
+  genesis previous hash, and state schema version.
+- `ledger/validation.py`: account and peer address checks, transaction
+  authorization, whole-chain validation, balance calculation, and
+  cumulative-work ranking.
+- `ledger/storage.py`: `NodeStateStore`, a versioned JSON store using
+  `pathlib` paths and atomic temporary-file replacement.
+- `ledger/synchronization.py`: peer state requests, failures/rejection reports,
+  and synchronization orchestration.
+- `ledger/blockchain.py`: the stateful `Blockchain` application service,
+  coordinating account/peer registration, transactions, mining, persistence,
+  validation, and state merge.
+- `api/helpers.py`: shared request parsing, outbound broadcasts, and
+  synchronization on rejected payloads.
+- `api/transactions.py`, `api/blocks.py`, `api/users.py`, and `api/nodes.py`:
+  focused Flask blueprints for the HTTP resources.
+- `app.py`: Flask application factory that assembles the blueprints around an
+  explicitly supplied `Blockchain` instance.
+- `main.py`: command-line startup, per-node data directory selection, and
+  periodic synchronization.
 
-Each `Blockchain` instance creates a random node identifier and a genesis
-block at startup. The genesis block includes the startup timestamp, so
-independently started processes usually produce different genesis hashes.
-State is local to that process and is not shared except through API requests.
-The project dependencies are declared in `pyproject.toml`.
+Each node should use a unique data directory. By default the command-line
+entry point uses `data/node-{port}/state.json`; `--data-dir` allows a custom
+path. The persisted state includes node identity, peers, users, pending
+transactions, chain, and derived balances.
 
 ## 4. Python Implementation
 
-The core is the `Blockchain` class. `new_transaction` appends a dictionary
-containing `sender`, `recipient`, and `amount` to the pending pool.
-`new_block` copies the pending transactions into a block, sets its index,
-timestamp, proof, previous hash, and calculated hash, then clears the pending
-pool for non-genesis blocks.
+The `Blockchain` service serializes mutations through a reentrant lock. It
+delegates persistence to `NodeStateStore` and validation to standalone
+functions in `ledger/validation.py`. HTTP behavior is kept out of that service
+and split across Flask blueprints. `create_app(blockchain)` requires a node
+instance, making ownership of persistent state explicit and avoiding implicit
+shared process-global node state.
 
-`create_app` accepts an optional blockchain instance, which allows separate
-in-process app instances to be created for testing or embedding. HTTP route
-handlers use Flask's JSON request and response helpers. Network calls have a
-three-second timeout; request exceptions are skipped, so the API response does
-not guarantee that a peer received a broadcast.
+State files carry a schema version. Writes serialize to a neighboring
+temporary file and replace `state.json` after the write completes. Loads
+check the schema, node and user identifiers, peer formats, chain validity,
+pending transaction validity, and that stored balances match the balances
+recalculated from the chain. Invalid or unsupported persisted data raises an
+error instead of silently starting a replacement identity.
 
 ## 5. Block Structure
 
-A block has the following fields:
+Every block contains:
 
 | Field | Meaning |
 | --- | --- |
-| `index` | Position in the chain, starting at zero |
-| `timestamp` | Creation time returned by Python's `time()` |
-| `transactions` | Transactions included in this block |
-| `proof` | Proof value found by the mining search |
+| `index` | Sequential chain position, beginning at zero |
+| `timestamp` | Block creation time |
+| `miner_id` | UUID of the account receiving the block reward |
+| `transactions` | Transfers, authorized credits, and one reward |
+| `proof` | Nonce-like integer included in the hashed block data |
 | `previous_hash` | Hash of the preceding block |
-| `hash` | SHA-256 digest of the sorted JSON representation of all other fields |
+| `hash` | SHA-256 digest of sorted JSON for all other block fields |
 
-The genesis block has index `0`, previous hash consisting of 64 zeroes, and a
-proof value of `100`. Its transaction list is empty; it is not a textual
-"Genesis Block" transaction.
+The genesis block has a fixed timestamp, proof `0`, no transactions, and a
+previous hash of 64 zeroes. Having the same genesis block allows independent
+nodes to accept compatible block broadcasts.
 
 ## 6. Transaction Processing
 
-The `/transaction` endpoint accepts JSON with `sender`, `receiver`, and
-`amount`. If a required key is absent, it returns HTTP 400. Otherwise it adds
-the transaction to the local pending pool and posts it to each registered
-peer's `/transaction/broadcast` endpoint. The peer endpoint avoids adding an
-identical transaction already in its pending pool.
+`POST /users/register` creates a UUID account with a display name and zero
+balance. Display names are labels, not account identifiers or proof of
+ownership. `POST /transaction` accepts `sender_id`, `recipient_id`, and
+`amount`. It assigns a transaction UUID, validates the identifiers and
+positive integer amount, reserves pending outgoing value when checking
+available balance, persists the pending transaction, and reports its peer
+broadcast results.
 
-The implementation does not check field types, amount range, sender funds,
-ownership, signatures, or duplicate transaction identifiers. The local
-transaction is stored with a `recipient` field internally, while the HTTP
-request uses `receiver`; the endpoint translates between those names before
-adding the transaction.
+`POST /transaction/broadcast` checks the transaction identifier against both
+the pending pool and chain, verifies users and amount, and repeats balance
+checks before storing a new pending transaction. Duplicate transaction IDs
+are not added.
 
-Mining adds a reward transaction with sender `"0"`, the local node identifier
-as recipient, and amount `1`. This is an illustrative reward, not a
-cryptographically enforced issuance rule.
+Optional funding is provided by `POST /users/credit`. The operator must set
+`BLOCKCHAIN_ADMIN_TOKEN` on every node and provide the matching
+`X-Admin-Token` header. The credit transaction is authenticated with an HMAC
+over its ID, recipient ID, and amount, and is then broadcast and committed
+only as part of a mined block. Every validating node must have the same
+administrator token configured for blocks containing credits to validate.
 
 ## 7. Proof of Work
 
-Mining increments a candidate proof from zero. For each candidate it computes
-SHA-256 over the UTF-8 bytes of the previous proof, candidate proof, and
-previous block hash concatenated as strings. A proof is accepted when this
-digest starts with four zeroes. The proof value is stored in the new block.
+Mining creates a candidate block header with index, timestamp, miner UUID,
+transactions, proof, and previous block hash. It increments the proof until
+the SHA-256 hash of the complete candidate block data has four leading zeroes.
+That candidate hash is stored as the block hash. Chain validation recalculates
+the hash from the stored block data and checks the difficulty condition.
 
-The difficulty is fixed in the code. This proof condition is not a requirement
-that the new block's own hash start with four zeroes, and there is no dynamic
-difficulty adjustment.
+The difficulty is a fixed constant. This implementation has no dynamic
+difficulty adjustment and no mining cancellation or resource limit.
 
 ## 8. P2P Communication
 
-Nodes expose Flask endpoints on their configured ports. The `/nodes/register`
-endpoint stores peer addresses. The transaction route broadcasts to peers at
-`/transaction/broadcast`; the mining route broadcasts new blocks at
-`/block/receive`. A node can retrieve another node's chain at `/blockchain`.
+Nodes expose Flask routes for transactions, blocks, user registries, node
+registries, and state export. Outbound HTTP calls use the `requests` library
+with a timeout. Broadcast replies are reported per peer as accepted, rejected,
+or error, including HTTP status when available. Rejections trigger a
+synchronization attempt.
 
-For a local three-node demonstration, start processes on ports 5001, 5002, and
-5003, register each node with the other two, then submit and mine a
-transaction. Transaction broadcasts can reach all registered nodes, but the
-nodes' independently timestamped genesis blocks usually have different
-hashes. As a result, peers reject the mined block's direct broadcast because
-its previous hash does not match their local genesis. A peer can instead use
-`/nodes/resolve` to adopt the miner's strictly longer valid chain. This
-architecture does not provide authentication or a resilient peer-discovery
-protocol.
+`GET /state` exports a peer's chain, user registry, and node addresses.
+`GET /nodes/resolve` requests this state from registered peers, validates it,
+and merges accepted updates. The application starts a synchronization worker
+on process startup and repeats it every 30 seconds.
 
 ## 9. Consensus/Synchronization Mechanism
 
-The `/nodes/resolve` route requests `/blockchain` from every registered peer.
-The resolver adopts a candidate only when it is both valid under
-`valid_chain` and strictly longer than the current local chain. It returns
-whether the local chain was replaced.
+Peer state is structurally checked before merge. User IDs and records must
+have valid formats and must not conflict with existing records; peer
+addresses must be valid host-and-port values. Candidate chains are validated
+against the merged user registry. A locally invalid chain can be replaced
+with a valid peer chain. Otherwise, the node compares cumulative proof-of-work
+and uses the tip hash as a deterministic tie-break.
 
-This is a basic longest-valid-chain selection rule rather than a robust
-consensus protocol. It has no fork-choice tie-breaker, quorum, finality, or
-resistance to identity manipulation. Equal-length chains are not compared, and
-an invalid local chain is not replaced by a valid chain of the same length.
-Because each process starts with a different genesis hash, direct block
-broadcasts between independently started nodes usually fail; resolving from a
-peer with a longer valid chain can replace the local chain instead.
+This is a better-defined fork-choice heuristic than chain length alone, but
+it is not consensus in the distributed-systems sense. Peers are unauthenticated,
+there is no quorum or finality, and the model does not prevent a sufficiently
+powerful or dishonest peer group from influencing the selected history.
 
 ## 10. Blockchain Validation
 
-The `/blockchain/validate` endpoint calls `is_chain_valid` and reports either
-`VALID` or `INVALID`. The chain validator rejects an empty chain, requires the
-first block's index to be zero and its previous hash to be 64 zeroes, then
-checks each later block's previous-hash link, recalculated hash, and proof
-against the previous block.
+The validator checks the fixed genesis block, each block's sequence index,
+previous-hash link, recomputed SHA-256 hash, and four-zero proof-of-work
+threshold. It also checks that the miner account is registered and that each
+block contains exactly one reward of one unit for that miner.
 
-The checks have important gaps. The genesis block's own hash is not
-recalculated, later block indexes are not checked for sequential ordering,
-and transaction contents are not validated. Further, `/block/receive` checks
-the block's recalculated hash but only invokes full-chain validation when its
-previous hash does not match the receiver's current tip. A block that directly
-extends that tip can therefore be appended without checking its proof or
-index. These gaps mean the endpoint's `VALID` response should be understood
-as passing the implemented checks, not as proof that a chain satisfies all
-blockchain integrity rules.
-
-Changing a hashed field in a non-genesis block without updating its hash
-causes the recalculated hash check to fail. A changed previous hash can also
-break the link from its successor. By contrast, the genesis-hash gap means
-that changing genesis fields not otherwise checked may go undetected.
+Transactions are checked for required fields, UUID transaction IDs, duplicate
+IDs, positive integer amounts, registered account IDs, sufficient balance,
+and authorized credit HMACs. Balances are replayed in order from the chain.
+Incoming blocks are appended only if the full candidate chain validates.
+Rejected blocks do not commit balances; balances are recomputed only after a
+valid block is accepted.
 
 ## 11. Security Analysis
 
-At least five relevant security issues are:
+1. **Account impersonation and unauthorized transfers:** UUIDs identify
+   accounts but do not prove who controls them. The transfer endpoint accepts
+   a sender UUID without a digital signature, so a caller can attempt to
+   transfer another user's funds. This is the most significant remaining
+   transaction-security gap.
+2. **Administrator-token compromise:** The same shared secret is used by all
+   validating nodes. A leaked token permits authorized-looking credit
+   transactions, and differing tokens cause nodes to reject credit-bearing
+   blocks.
+3. **Peer impersonation and Sybil behavior:** Peer registration and state
+   exchange do not authenticate node identities. A malicious peer can provide
+   conflicting or strategically selected valid chain state.
+4. **Man-in-the-middle attacks:** Node communication is plain HTTP without
+   transport encryption, so traffic can be observed or modified on the
+   network path.
+5. **Denial of service:** There is no rate limit or request-size policy.
+   Mining is CPU work and incoming API requests are not authenticated.
+6. **Replay and transaction-level authorization:** UUID transaction IDs
+   prevent accidental duplicate inclusion in one chain, but there is no user
+   signature or nonce proving that a transfer was authorized by its sender.
+7. **Persistence scope:** Atomic replacement protects against ordinary
+   partial writes but does not coordinate multiple processes pointed at the
+   same node directory. Separate node directories are required.
 
-1. **Sybil attack and node impersonation:** Peer registration accepts
-   unauthenticated addresses, and there is no identity verification. An
-   attacker able to register or control peer addresses can influence the
-   information a node receives.
-2. **Double-spending and transaction manipulation:** Transactions are not
-   signed and no balances or spending rules are maintained. A sender field
-   can be supplied arbitrarily, and the same value can be represented by
-   multiple transactions.
-3. **Man-in-the-middle attack:** Peer communication uses unencrypted HTTP.
-   Network traffic can be observed or modified by an attacker with access to
-   the communication path.
-4. **Denial of service:** There is no authentication, rate limiting, request
-   size limit, or mining resource limit. Repeated requests or expensive work
-   can consume node resources.
-5. **Weak validation:** Incoming blocks are not fully checked when they
-   directly extend a node's current tip, and the chain validator omits
-   genesis-hash, index-order, and transaction validation.
-6. **Weak consensus and recovery:** The longest-valid-chain rule can be
-   influenced by an attacker controlling enough reachable nodes, does not
-   handle equal-length forks, and does not repair an invalid local chain using
-   an equal-length valid peer copy.
-7. **No private-key management:** There are no keys or digital signatures to
-   establish transaction ownership or protect users' funds.
-
-The implementation should only be run in a trusted local demonstration
-environment until these issues are addressed.
+The prototype should only be used in a trusted local environment.
 
 ## 12. Experimental Results
 
-The project supports the following reproducible observations:
+The implementation was exercised with standard-library unit tests and
+three in-process Flask test clients using separate temporary directories:
 
-| Experiment | Expected observation |
+| Experiment | Observed result |
 | --- | --- |
-| Start three processes and register peers | Each node reports its registered peer addresses |
-| Submit a transaction to one registered node | It appears in that node's pending pool and is broadcast to peers that accept the request |
-| Mine on that node | A block is returned with the pending transaction and mining reward; peers with a different genesis hash reject the direct block broadcast |
-| Call `/nodes/resolve` on a peer with a shorter chain | It adopts the miner's strictly longer valid chain |
-| Call `/blockchain/validate` on an unmodified locally mined or resolved chain | The chain passes the implemented validation checks |
-| Alter a hashed field in a non-genesis block without recalculating its hash | Validation reports `INVALID` |
-| Call `/nodes/resolve` with a strictly longer valid peer chain | The local chain is replaced by that peer chain |
-| Try to recover an invalid chain from an equally long valid peer chain | The chain is not replaced; resolver only selects a strictly longer candidate |
+| Register peers and a UUID account | User records propagate to registered peers |
+| Attempt credit with wrong admin token | Request is rejected with HTTP 403 |
+| Authorize credit, mine, and broadcast block | Peers accept the block and derive the same funded balance |
+| Submit transfer over available balance or malformed recipient | Request is rejected |
+| Mine a valid transfer | Each peer's derived sender balance is reduced consistently |
+| Restart each `Blockchain` from its own directory | Node identity, ledger, and balances are restored |
+| Submit a block with an invalid proof | Receiver rejects it and retains the settled balance |
+| Synchronize a new node from an existing peer | Valid chain, users, and peer state are imported |
+| Recalculate a block hash after changing its proof | Chain validation still rejects it because the proof does not meet the required difficulty |
 
-The equal-length result is a known deviation from the assignment
-demonstration's recovery expectation. Also, independent genesis blocks prevent
-normal direct block propagation; the longest-chain resolver is the path that
-lets a shorter peer catch up. A receiver can append a directly extending block
-without fully checking its proof and index. These results follow from the
-current implementation and should be included when evaluating its correctness.
+The committed unit tests cover deterministic genesis/mining hashes, balance
+replay and persistence, invalid proof rejection, state-merge rejection, and
+the user-registration API. The three-node test-client check also exercised
+peer registration, user propagation, authorized credit, transfer/block
+broadcasts, restart persistence, and a late node's state synchronization.
+These checks do not constitute a real multi-process network or a comprehensive
+security test suite.
 
 ## 13. Limitations
 
-- Chain, pending transaction, and peer state are in memory only.
-- Independently started nodes usually have different genesis hashes, so they
-  reject direct broadcasts of each other's first mined block. A node must
-  resolve from a strictly longer valid peer chain to adopt that history.
-- The synchronization strategy cannot repair an invalid chain from an
-  equal-length peer and does not resolve equal-length forks.
-- Block reception and full-chain validation omit integrity checks described
-  in Section 10.
-- Transaction values and identities are not validated; there are no balances,
-  signatures, or replay protection.
-- HTTP communication and peer registration are unauthenticated and
-  unencrypted.
-- Failed broadcasts are ignored, with no acknowledgement or retry.
-- The proof-of-work difficulty is fixed, and mining has no cancellation or
-  resource controls.
-- There is no persistent storage, rate limiting, formal test suite, or
-  production deployment configuration.
+- No cryptographic user keys or signatures protect transfers; account IDs can
+  be copied and used by arbitrary callers.
+- Admin credits depend on a shared token, which must match on all nodes.
+- HTTP peers and peer registration are unauthenticated. Peer discovery and
+  trust are not resilient to malicious participants.
+- The JSON store is per node and requires each node process to use a unique
+  data directory. It is not a database and has no cross-process locking.
+- Fork choice uses cumulative proof-of-work plus a deterministic hash tie
+  break, without quorum, finality, or Byzantine agreement.
+- Difficulty is fixed at four leading zeroes; there are no fee rules,
+  adjustable difficulty, mining limits, or durable retry queues.
+- Periodic synchronization is best-effort and depends on reachable peers.
+- The focused integration checks use in-process test clients; a complete
+  automated test suite and deployment hardening remain future work.
 
 ## 14. Conclusion
 
-The project demonstrates the core flow of a small blockchain application:
-transactions enter a pending pool, a node performs a proof-of-work search,
-blocks are linked by SHA-256 hashes, and peer nodes attempt to exchange
-updates over HTTP. Its modular implementation makes these ideas
-straightforward to explore.
+The application now separates HTTP route concerns from ledger behavior and
+separates validation, persistence, and synchronization from the central
+blockchain service. The focused modules make the implementation easier to
+inspect and extend. Nodes persist independent state, validate transactions
+against ledger-derived balances, report broadcast results, and synchronize
+validated peer state using cumulative work rather than length alone.
 
-It is not a secure or complete implementation of the assignment's full
-validation and recovery goals. In particular, block reception needs
-unconditional validation and synchronization needs an explicit strategy for
-invalid and equal-length chains. Addressing those issues, then adding signed
-transactions, persistence, peer authentication, and automated tests, would
-be the next steps toward a more complete educational prototype.
+These improvements do not make the prototype safe for real funds. Signed
+transactions, authenticated peer communication, a durable multi-process store,
+formal consensus/finality, and a broad automated test suite are the most
+important next steps.
 
 ## 15. References
 
