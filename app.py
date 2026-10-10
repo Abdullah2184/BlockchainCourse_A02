@@ -50,7 +50,7 @@ def create_app(blockchain_instance=None):
             "receiver": values["receiver"],
             "amount": values["amount"],
         }
-
+        #Add the transaction to the node's list of current transactions (mempool)
         if transaction not in blockchain.current_transactions:
             blockchain.current_transactions.append(transaction)
             return jsonify({"message": "Transaction added successfully"}), 201
@@ -64,11 +64,12 @@ def create_app(blockchain_instance=None):
     @app.route("/mine", methods=["POST"])
     def mine_block():
         last_block = blockchain.last_block
-        proof = blockchain.proof_of_work(last_block)
-        blockchain.new_transaction(sender="0", recipient=blockchain.node_id, amount=1)
+        proof = blockchain.proof_of_work(last_block) #Mining functionality
+        blockchain.new_transaction(sender="0", recipient=blockchain.node_id, amount=1) #Mining reward transaction
         previous_hash = blockchain.hash(last_block)
         block = blockchain.new_block(proof, previous_hash)
 
+        #Broadcast the block
         for peer in list(blockchain.nodes):
             try:
                 import requests
@@ -93,9 +94,11 @@ def create_app(blockchain_instance=None):
         if not isinstance(block, dict):
             return jsonify({"message": "Missing block data"}), 400
 
+        #Check if the received block integrity has been maintained
         if block.get("hash") != Blockchain.hash(block):
             return jsonify({"message": "Block hash mismatch"}), 400
 
+        #Check if recieved block previous hash matches what is on the node's blockchain
         if len(blockchain.chain) > 0 and block.get("previous_hash") != blockchain.hash(blockchain.last_block):
             if not blockchain.valid_chain(blockchain.chain + [block]):
                 return jsonify({"message": "Invalid block"}), 400
@@ -103,6 +106,7 @@ def create_app(blockchain_instance=None):
         if any(existing.get("hash") == block.get("hash") for existing in blockchain.chain):
             return jsonify({"message": "Block already known"}), 200
 
+        #Add new block to the blockchain if it has been validated
         blockchain.chain.append(block)
         blockchain.current_transactions = []
         return jsonify({"message": "Block received and added"}), 201

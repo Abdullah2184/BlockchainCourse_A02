@@ -23,12 +23,13 @@ class Blockchain:
             "proof": proof,
             "previous_hash": previous_hash or self.hash(self.last_block),
         }
-        block["hash"] = self.hash(block)
+        block["hash"] = self.hash(block) #block hash calculated after other data is first appended
 
+        #Empty the list of current transactions for regular blocks
         if not is_genesis:
             self.current_transactions = []
 
-        self.chain.append(block)
+        self.chain.append(block) #Add the new block to the chain
         return block
 
     def new_transaction(self, sender, recipient, amount):
@@ -50,7 +51,7 @@ class Blockchain:
 
     def proof_of_work(self, last_block):
         last_proof = last_block["proof"]
-        last_hash = last_block.get("hash") or self.hash(last_block)
+        last_hash = last_block.get("hash") or self.hash(last_block) # Calculate the hash of the previous block
         proof = 0
         while not self.valid_proof(last_proof, proof, last_hash):
             proof += 1
@@ -72,11 +73,13 @@ class Blockchain:
         if not chain:
             return False
 
+        #Validating that the genesis block is correct
         if chain[0].get("index") != 0:
             return False
         if chain[0].get("previous_hash") != "0" * 64:
             return False
 
+        #Going through the chain to validate inter-linkage, proof of work and hash integrity
         last_block = chain[0]
         for block in chain[1:]:
             if block.get("previous_hash") != self.hash(last_block):
@@ -89,14 +92,16 @@ class Blockchain:
 
         return True
 
+    #unnecessary backward compatibility function
     def is_chain_valid(self):
         return self.valid_chain(self.chain)
 
     def resolve_conflicts(self):
         neighbors = list(self.nodes)
-        max_length = len(self.chain)
+        max_length = len(self.chain) #default maximum is node's own chain
         new_chain = None
 
+        #request other nodes for their respective blockchains
         for node in neighbors:
             try:
                 response = requests.get(f"http://{node}/blockchain", timeout=3)
@@ -119,7 +124,6 @@ class Blockchain:
             self.chain = new_chain
             return True
         return False
-
 
 def is_chain_valid(blockchain):
     return blockchain.is_chain_valid()
