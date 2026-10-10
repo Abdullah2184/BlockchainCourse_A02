@@ -139,24 +139,24 @@ the full behavior and security analysis.
 ## Current limitations
 
 - All state is held in process memory; restarting a node loses its chain,
-  pending transactions, and registered peers.
+  pending transactions, and registered peers. (Data storage limitation)
 - Each process creates a timestamped genesis block independently, so nodes
   usually have different genesis hashes and reject each other's directly
   broadcast blocks. A node can catch up by adopting a strictly longer valid
   peer chain through `/nodes/resolve`.
 - Chain synchronization uses a longest-valid-chain rule. It does not replace
-  an equally long local chain, even when the local chain is invalid.
+  an equally long local chain, even when the local chain is invalid. (Security limitation)
 - Block reception does not fully validate proof of work and block sequence
   when a block directly extends the local tip. The full-chain validator also
   does not check the genesis block's hash, every block index, or transaction
   contents.
 - Transactions are only checked for the presence of `sender`, `receiver`, and
-  `amount`. There are no signatures, balance checks, or replay protection.
+  `amount`. There are no signatures, balance checks, or replay protection. (Security limitation)
 - Peer addresses and API requests are unauthenticated; traffic is plain HTTP.
 - Network broadcast failures are ignored, and the sender does not confirm that
-  peers accepted a broadcast.
+  peers accepted a broadcast. (Protocol limitation)
 - The proof of work is fixed at four leading zeroes and is based on proof
-  values and the prior hash, not a hash of the new block header.
+  values and the prior hash, not a hash of the new block header. (Accuracy limitation)
 - The HTTP service is intended for local demonstrations, not internet-facing
   use. There is no rate limiting, persistent storage, or robust concurrent
   state management.
