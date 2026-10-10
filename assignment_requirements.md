@@ -29,16 +29,6 @@ The system should support:
 - Synchronizing the blockchain between nodes
 - Detecting invalid or tampered blocks
 
-## Example Network
-
-Node 1 <----> Node 2
-
-\              /
-\            /
-    Node 3
-
-P2P Network: Each node maintains its own local copy of the blockchain.
-
 # 4. Functional Requirements
 
 ## Part A — Blockchain Implementation
@@ -124,7 +114,7 @@ Implement a mechanism through which a node can request the latest blockchain fro
 # 5. Suggested API Endpoints
 
 | Endpoint | Method | Purpose |
-| --- | --- | --- |
+| ---      |  ---   |  ---    |
 | /transaction | POST | Create a transaction |
 | /transactions | GET | View pending transactions |
 | /mine | POST | Mine a new block |
@@ -208,56 +198,6 @@ Students must discuss at least five security issues associated with their implem
 13. Limitations
 14. Conclusion
 15. References
-
-# 11. Deliverables
-
-## 1. Source Code
-
-Complete Python source code.
-
-## 2. Report
-
-Approximately 8–12 pages.
-
-## 3. Demonstration
-
-Live demonstration of the three-node blockchain network.
-
-## 4. README
-
-The README should explain installation, dependencies, how to start each node, how to create a transaction, how to mine, and how to synchronize nodes.
-
-# 12. Suggested Project Structure
-
-blockchain_network/
-
-├── block.py
-├── blockchain.py
-├── transaction.py
-├── node.py
-├── network.py
-├── server.py
-├── requirements.txt
-├── README.md
-└── tests/
-    ├── test_block.py
-    ├── test_blockchain.py
-    └── test_network.py
-
-# 13. Marking Scheme — 20 Marks
-
-| Component | Marks |
-| --- | --- |
-| Blockchain and Block Implementation | 3 |
-| Transaction Management | 2 |
-| Proof of Work | 2 |
-| P2P Network Communication | 4 |
-| Block/Transaction Broadcasting | 3 |
-| Blockchain Validation & Synchronization | 2 |
-| Security Analysis | 2 |
-| Report & Documentation | 1 |
-| Demonstration | 1 |
-| Total | 20 |
 
 # 14. Bonus Challenge — 5 Marks
 
